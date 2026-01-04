@@ -3,13 +3,13 @@
     "apis": {
       "custom": {
         "endpoint": {
-          "uri": "CONFIGURE_IN_SECRETS_JSON"
+          "uri": "ARN_CONFIGURED_IN_SECRETS_JSON"
         }
       }
     },
     "manifestVersion": "1.0",
     "publishingInformation": {
-      "category": "KNOWLEDGE_AND_TRIVIA",
+      "category": "Other",
       "distributionCountries": [],
       "isAvailableWorldwide": true,
       "locales": {
