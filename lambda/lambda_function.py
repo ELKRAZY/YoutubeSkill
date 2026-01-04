@@ -4,7 +4,6 @@ from ask_sdk_core.skill_builder import SkillBuilder
 from ask_sdk_core.dispatch_components import AbstractRequestHandler
 from ask_sdk_core.dispatch_components import AbstractExceptionHandler
 from ask_sdk_core.handler_input import HandlerInput
-from ask_sdk_core.handler_input import HandlerInput
 from ask_sdk_model import Response
 from ask_sdk_model.interfaces.audioplayer import (
     PlayDirective, PlayBehavior, AudioItem, Stream, StopDirective
@@ -41,8 +40,6 @@ class SearchIntentHandler(AbstractRequestHandler):
     def handle(self, handler_input):
         # Obtener el término de búsqueda del slot "query"
         slots = handler_input.request_envelope.request.intent.slots
-        # Obtener el término de búsqueda del slot "query"
-        slots = handler_input.request_envelope.request.intent.slots
         query = None
         if slots and "query" in slots and slots["query"].value:
             query = slots["query"].value
@@ -52,8 +49,6 @@ class SearchIntentHandler(AbstractRequestHandler):
             return handler_input.response_builder.speak(speak_output).ask(speak_output).response
 
         try:
-            # Inicializar YouTube Helper
-            # NOTA: Asegúrate de tener YOUTUBE_API_KEY en las variables de entorno
             yt = YouTubeHelper()
             videos = yt.search_videos(query, max_results=1)
             
@@ -270,10 +265,20 @@ class DefaultExceptionHandler(AbstractExceptionHandler):
 
 
 class SessionEndedRequestHandler(AbstractRequestHandler):
+    """Handler para el cierre de sesión"""
     def can_handle(self, handler_input):
         return ask_utils.is_request_type("SessionEndedRequest")(handler_input)
 
     def handle(self, handler_input):
+        return handler_input.response_builder.response
+
+class CatchAllRequestHandler(AbstractRequestHandler):
+    """Handler para capturar cualquier petición no manejada"""
+    def can_handle(self, handler_input):
+        return True
+
+    def handle(self, handler_input):
+        logger.info(f"CATCH ALL: Peticion de tipo {handler_input.request_envelope.request.object_type} no manejada.")
         return handler_input.response_builder.response
 
 
@@ -290,6 +295,9 @@ sb.add_request_handler(SessionEndedRequestHandler())
 sb.add_request_handler(AudioPlayerEventHandler())
 sb.add_request_handler(PauseIntentHandler())
 sb.add_request_handler(ResumeIntentHandler())
+
+# EL ÚLTIMO: Catch All
+sb.add_request_handler(CatchAllRequestHandler())
 
 sb.add_exception_handler(DefaultExceptionHandler())
 

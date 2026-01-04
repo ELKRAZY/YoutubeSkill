@@ -2,38 +2,25 @@
 Helper module para interactuar con YouTube Data API v3
 """
 import os
-from googleapiclient.discovery import build
+import json
+import shutil
+import logging
+import yt_dlp
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
-import yt_dlp
-import logging
 
 logger = logging.getLogger(__name__)
-
+logger.setLevel(logging.INFO)
 
 class YouTubeHelper:
     """Clase para manejar búsquedas en YouTube"""
     
     def __init__(self, api_key=None):
-        """
-        Inicializa el helper de YouTube
-        
-        Args:
-            api_key: API key de YouTube Data API v3
-                    Prioridad: 
-                    1. Argumento api_key
-                    2. secrets.json (si existe)
-                    3. Variable de entorno YOUTUBE_API_KEY
-        """
         self.api_key = api_key
         
-        # Si no se pasó como argumento, intentar leer de secrets.json
         if not self.api_key:
             try:
-                import json
-                # Intentar primero en el directorio actual (para Lambda)
                 current_dir_secrets = os.path.join(os.path.dirname(__file__), 'secrets.json')
-                # Intentar luego en el directorio padre (para desarrollo local)
                 parent_dir_secrets = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'secrets.json')
                 
                 secrets_path = None
@@ -45,31 +32,19 @@ class YouTubeHelper:
                 if secrets_path:
                     with open(secrets_path, 'r') as f:
                         secrets = json.load(f)
-                        # Busca en secrets['youtube']['api_key'] o en secrets['YOUTUBE_API_KEY']
                         self.api_key = secrets.get('youtube', {}).get('api_key') or secrets.get('YOUTUBE_API_KEY')
             except Exception as e:
-                print(f"No se pudo leer secrets.json: {e}")
+                logger.error(f"No se pudo leer secrets.json: {e}")
 
-        # Si aún no tenemos key, intentar variable de entorno
         if not self.api_key:
             self.api_key = os.environ.get('YOUTUBE_API_KEY')
 
         if not self.api_key:
-            raise ValueError("YouTube API key no encontrada. Configúrala en secrets.json o variable de entorno YOUTUBE_API_KEY")
+            raise ValueError("YouTube API key no encontrada.")
         
         self.youtube = build('youtube', 'v3', developerKey=self.api_key)
     
     def search_videos(self, query, max_results=1):
-        """
-        Busca videos en YouTube
-        
-        Args:
-            query: Término de búsqueda
-            max_results: Número máximo de resultados (default: 1)
-            
-        Returns:
-            Lista de diccionarios con información de videos
-        """
         try:
             search_response = self.youtube.search().list(
                 q=query,
@@ -90,23 +65,12 @@ class YouTubeHelper:
                         'url': f"https://www.youtube.com/watch?v={search_result['id']['videoId']}"
                     }
                     videos.append(video_info)
-            
             return videos
-            
         except HttpError as e:
-            print(f'Error en la búsqueda de YouTube: {e}')
+            logger.error(f'Error en la búsqueda de YouTube: {e}')
             return []
     
     def get_channel_latest_video(self, channel_id):
-        """
-        Obtiene el último video de un canal
-        
-        Args:
-            channel_id: ID del canal de YouTube
-            
-        Returns:
-            Diccionario con información del video más reciente
-        """
         try:
             search_response = self.youtube.search().list(
                 channelId=channel_id,
@@ -124,20 +88,12 @@ class YouTubeHelper:
                     'description': video['snippet']['description'],
                     'url': f"https://www.youtube.com/watch?v={video['id']['videoId']}"
                 }
-            
             return None
-            
-            
-            return None
-            
         except HttpError as e:
-            print(f'Error obteniendo último video: {e}')
+            logger.error(f'Error obteniendo último video: {e}')
             return None
 
     def get_channel_id_by_name(self, channel_name):
-        """
-        Busca un canal por nombre y retorna su ID
-        """
         try:
             search_response = self.youtube.search().list(
                 q=channel_name,
@@ -145,41 +101,124 @@ class YouTubeHelper:
                 part='id',
                 maxResults=1
             ).execute()
-            
             if search_response.get('items'):
                 return search_response['items'][0]['id']['channelId']
             return None
         except HttpError as e:
-            print(f'Error buscando canal: {e}')
+            logger.error(f'Error buscando canal: {e}')
             return None
 
     def get_audio_url(self, video_id):
         """
-        Obtiene la URL de streaming de audio para un video
+        Extracción de audio DEEP-SEARCH: Extraemos todos los formatos y elegimos manualmente.
         """
+        logger.info(f"--- INICIO EXTRACCION DEEP-SEARCH: {video_id} ---")
         video_url = f"https://www.youtube.com/watch?v={video_id}"
-        ydl_opts = {
-            'format': 'bestaudio/best',
-            'noplaylist': True,
-            'quiet': True,
-            'no_warnings': True,
-            'extract_flat': False,
-            'cache_dir': '/tmp',
-            'nocheckcertificate': True,
-            'youtube_include_dash_manifest': False,
-            'youtube_include_hls_manifest': False,
-            'check_formats': False,
-            'extractor_args': {
-                'youtube': {
-                    'player_client': ['tv', 'mweb', 'web_embedded']
+        
+        # Gestion de COOKIES
+        temp_cookies_path = '/tmp/yt_cookies.txt'
+        local_cookies_path = os.path.join(os.path.dirname(__file__), 'cookies.txt')
+        cookiefile = None
+        if os.path.exists(local_cookies_path):
+            try:
+                shutil.copy2(local_cookies_path, temp_cookies_path)
+                cookiefile = temp_cookies_path
+                logger.info("LOG: Cookies cargadas.")
+            except Exception as e:
+                logger.error(f"LOG ERROR Cookies: {e}")
+
+        # Estrategias optimizadas SÓLO para pasar el login
+        # NO ponemos 'format' AQUÍ para evitar que yt-dlp falle prematuramente
+        strategies = [
+            {
+                'name': 'iOS-Headers',
+                'client': ['ios'],
+                'skip': ['web', 'tv'],
+                'headers': {
+                    'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/604.1',
+                    'Referer': 'https://www.youtube.com/',
+                    'Origin': 'https://www.youtube.com'
+                }
+            },
+            {
+                'name': 'TV-Clean',
+                'client': ['tv'],
+                'skip': ['web', 'ios', 'android'],
+                'headers': {'Referer': 'https://www.youtube.com/'}
+            },
+            {
+                'name': 'MWeb-Fallback',
+                'client': ['mweb', 'android'],
+                'skip': ['web'],
+                'headers': {'Referer': 'https://www.youtube.com/'}
+            }
+        ]
+
+        for s in strategies:
+            logger.info(f"TRYing strategy: {s['name']}")
+            ydl_opts = {
+                # IMPORTANTE: No ponemos 'format' para que nos devuelva TODO
+                'cookiefile': cookiefile,
+                'noplaylist': True,
+                'quiet': True,
+                'no_warnings': True,
+                'nocheckcertificate': True,
+                'http_headers': s['headers'],
+                'youtube_include_dash_manifest': True,
+                'youtube_include_hls_manifest': True,
+                'check_formats': False, 
+                'extractor_args': {
+                    'youtube': {
+                        'player_client': s['client'],
+                        'player_skip': s['skip']
+                    }
                 }
             }
-        }
-        
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(video_url, download=False)
-                return info['url']
-        except Exception as e:
-            logger.error(f"Error extrayendo audio para {video_id}: {e}", exc_info=True)
-            return None
+            
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(video_url, download=False)
+                    
+                    if not info or 'formats' not in info:
+                        logger.warning(f"No formats found for {s['name']}")
+                        continue
+                    
+                    # BUSQUEDA MANUAL DE URL
+                    # Prioridad: 1. Audio m4a/mp3, 2. Cualquier Audio, 3. Cualquier Stream con URL
+                    formats = info['formats']
+                    logger.info(f"Found {len(formats)} potential formats for {s['name']}")
+                    
+                    # Candidatos
+                    audio_urls = []
+                    mixed_urls = []
+                    
+                    for f in formats:
+                        url = f.get('url')
+                        if not url: continue
+                        
+                        acodec = f.get('acodec', 'none')
+                        vcodec = f.get('vcodec', 'none')
+                        
+                        if acodec != 'none' and vcodec == 'none':
+                            # Es audio puro
+                            # Preferir m4a (que suele ser aceptado por Alexa)
+                            prio = 10 if f.get('ext') == 'm4a' else 5
+                            audio_urls.append((prio, url))
+                        elif url:
+                            mixed_urls.append(url)
+                            
+                    if audio_urls:
+                        # Ordenar por prioridad y devolver la mejor
+                        audio_urls.sort(key=lambda x: x[0], reverse=True)
+                        logger.info(f"SUCCESS: Found AUDIO URL via {s['name']}!")
+                        return audio_urls[0][1]
+                        
+                    if mixed_urls:
+                        logger.info(f"SUCCESS: Found MIXED URL via {s['name']}!")
+                        return mixed_urls[0]
+
+            except Exception as e:
+                logger.warning(f"FAIL {s['name']}: {str(e)[:150]}")
+            
+        logger.error(f"--- FIN EXTRACCION (FALLO TOTAL) ---")
+        return None
