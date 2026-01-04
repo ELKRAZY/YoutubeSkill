@@ -3,7 +3,12 @@ Helper module para interactuar con YouTube Data API v3
 """
 import os
 from googleapiclient.discovery import build
+from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+import yt_dlp
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class YouTubeHelper:
@@ -122,6 +127,59 @@ class YouTubeHelper:
             
             return None
             
+            
+            return None
+            
         except HttpError as e:
             print(f'Error obteniendo último video: {e}')
+            return None
+
+    def get_channel_id_by_name(self, channel_name):
+        """
+        Busca un canal por nombre y retorna su ID
+        """
+        try:
+            search_response = self.youtube.search().list(
+                q=channel_name,
+                type='channel',
+                part='id',
+                maxResults=1
+            ).execute()
+            
+            if search_response.get('items'):
+                return search_response['items'][0]['id']['channelId']
+            return None
+        except HttpError as e:
+            print(f'Error buscando canal: {e}')
+            return None
+
+    def get_audio_url(self, video_id):
+        """
+        Obtiene la URL de streaming de audio para un video
+        """
+        video_url = f"https://www.youtube.com/watch?v={video_id}"
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'noplaylist': True,
+            'quiet': True,
+            'no_warnings': True,
+            'extract_flat': False,
+            'cache_dir': '/tmp',
+            'nocheckcertificate': True,
+            'youtube_include_dash_manifest': False,
+            'youtube_include_hls_manifest': False,
+            'check_formats': False,
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['tv', 'mweb', 'web_embedded']
+                }
+            }
+        }
+        
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(video_url, download=False)
+                return info['url']
+        except Exception as e:
+            logger.error(f"Error extrayendo audio para {video_id}: {e}", exc_info=True)
             return None

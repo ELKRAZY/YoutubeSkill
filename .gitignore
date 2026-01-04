@@ -3,14 +3,20 @@ secrets.json
 
 # ASK CLI
 .ask/
+ask-resources.json.bak
 
 # Node modules
 node_modules/
 package-lock.json
 
+# Alexa & Lambda
+lambda_pkg/
+lambda_function.zip
+
 # Python
 __pycache__/
 *.py[cod]
+*.pyc
 *$py.class
 *.so
 .Python
