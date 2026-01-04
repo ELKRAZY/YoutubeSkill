@@ -1,0 +1,31 @@
+{
+  "manifest": {
+    "apis": {
+      "custom": {
+        "endpoint": {
+          "uri": "CONFIGURE_IN_SECRETS_JSON"
+        }
+      }
+    },
+    "manifestVersion": "1.0",
+    "publishingInformation": {
+      "category": "KNOWLEDGE_AND_TRIVIA",
+      "distributionCountries": [],
+      "isAvailableWorldwide": true,
+      "locales": {
+        "es-ES": {
+          "description": "Skill para buscar videos en YouTube",
+          "examplePhrases": [
+            "Alexa abre Youtube Skill",
+            "abre Youtube Skill",
+            "ponme un video de YouTube"
+          ],
+          "keywords": [],
+          "name": "Youtube",
+          "summary": "Skill para buscar videos en YouTube"
+        }
+      },
+      "testingInstructions": ""
+    }
+  }
+}
