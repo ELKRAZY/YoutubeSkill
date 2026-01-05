@@ -171,30 +171,43 @@ class YouTubeHelper:
 
     def _get_remote_fallback(self, video_id):
         """
-        Sistema de Respaldo Redundante (Multi-Instance) Refinado 2026:
-        Itera sobre una lista de instancias públicas (Piped/Invidious)
-        hasta encontrar una que responda con audio.
-        Incluye fix SSL para Lambda y Preferencia de Idioma (?hl=es).
+        Sistema de Respaldo Redundante V8.5 (Safety in Numbers):
+        Ante bloqueos masivos de IPs de datacenter, la estrategia es:
+        1. Lista masiva de instancias (mix Piped/Invidious).
+        2. Aleatorización para no quemar siempre las primeras.
+        3. Sin parámetros extraños (?hl=es) que puedan provocar errores en WAFs.
         """
-        # Lista de instancias Frescas (Enero 2026)
         instances = [
-            # Invidious (API v1)
-            ("https://inv.nadeko.net", "invidious"), 
-            ("https://yewtu.be", "invidious"), 
-            ("https://invidious.flokinet.to", "invidious"),
-            ("https://invidious.f5.si", "invidious"),
+            # --- INVIDIOUS (API v1) ---
+            ("https://inv.nadeko.net", "invidious"),
             ("https://inv.perditum.com", "invidious"),
+            ("https://invidious.flokinet.to", "invidious"),
+            ("https://yewtu.be", "invidious"),
+            ("https://invidious.f5.si", "invidious"),
             ("https://invidious.nerdvpn.de", "invidious"),
-            # Piped (Streams)
+            ("https://iv.ggtyler.dev", "invidious"),
+            ("https://invidious.lunar.icu", "invidious"),
+            ("https://invidious.projectsegfau.lt", "invidious"),
+            ("https://inv.tux.pizza", "invidious"),
+            ("https://invidious.private.coffee", "invidious"),
+            # --- PIPED (Streams) ---
             ("https://pipedapi.kavin.rocks", "piped"),
             ("https://api.piped.privacy.com.de", "piped"),
+            ("https://pipedapi.moomoo.me", "piped"),
+            ("https://pipedapi.smnz.de", "piped"),
+            ("https://api.piped.yt", "piped"),
+            ("https://piped.video", "piped"), # A veces expone API
         ]
         
         import urllib.request
         import json
         import ssl
+        import random
 
-        logger.info(f"INICIANDO FALLBACK REMOTO CON {len(instances)} INSTANCIAS...")
+        # Mezclar lista para evitar patrones de bloqueo y distribuir carga
+        random.shuffle(instances)
+
+        logger.info(f"INICIANDO FALLBACK REMOTO V8.5: Probando {len(instances)} instancias (Randomized).")
 
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
@@ -202,27 +215,30 @@ class YouTubeHelper:
 
         for base_url, api_type in instances:
             try:
-                # Construir URL según tipo de API
+                # Construir URL limpia (sin params locos)
                 if api_type == "invidious":
-                    # ?hl=es fuerza la localización de la instancia a Español
-                    req_url = f"{base_url}/api/v1/videos/{video_id}?hl=es"
+                    req_url = f"{base_url}/api/v1/videos/{video_id}"
                 else: # piped
                     req_url = f"{base_url}/streams/{video_id}"
                 
-                logger.info(f"Probando Remote ({api_type}): {base_url} ...")
+                # logger.info(f"Probando: {base_url} ...") # Log menos verboso
                 
                 req = urllib.request.Request(
                     req_url, 
                     headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
                 )
                 
-                with urllib.request.urlopen(req, timeout=5, context=ctx) as response:
+                with urllib.request.urlopen(req, timeout=4, context=ctx) as response: # Timeout corto (4s)
                     if response.getcode() == 200:
-                        data = json.loads(response.read().decode('utf-8'))
-                        
+                        try:
+                            data = json.loads(response.read().decode('utf-8'))
+                        except Exception:
+                            # Si falla el parseo JSON, saltar (ej. Cloudflare challenge page)
+                            continue
+
                         audio_url = None
                         
-                        # Extraer URL según el formato de la API
+                        # LOGICA DE EXTRACCION
                         if api_type == "invidious":
                             for f in data.get('adaptiveFormats', []):
                                 mime = f.get('type', '')
@@ -237,16 +253,12 @@ class YouTubeHelper:
                                     break
                         
                         if audio_url:
-                            logger.info(f"EXITO REMOTE: Audio encontrado en {base_url}")
+                            logger.info(f"EXITO REMOTE: Audio rescatado de {base_url}")
                             return audio_url
-                        else:
-                            logger.warning(f"FALLO PARCIAL: {base_url} respondió OK pero sin streams de audio adecuados.")
-                    else:
-                        logger.warning(f"FALLO HTTP {response.getcode()} en {base_url}")
-                        
             except Exception as e:
-                logger.warning(f"ERROR Conexión {base_url}: {str(e)[:100]}")
+                # Silencioso en logs para no ensuciar, solo si debugging
+                # logger.warning(f"Error {base_url}: {e}")
                 continue 
-        
-        logger.error("FALLO TOTAL REMOTE: Ninguna instancia respondió.")
+
+        logger.error("FALLO TOTAL REMOTE: Todas las instancias fallaron o bloquearon la IP.")
         return None
