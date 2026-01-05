@@ -13,8 +13,12 @@ from ask_sdk_model.interfaces.audioplayer import (
 from youtube_helper import YouTubeHelper
 import os
 
-logger = logging.getLogger(__name__)
+# Configuración de LOGS para AWS Lambda
+logging.basicConfig(level=logging.INFO, force=True)
+logger = logging.getLogger()
 logger.setLevel(logging.INFO)
+
+logger.info("LAMBDA: Iniciando carga del modulo lambda_function.py")
 
 
 class LaunchRequestHandler(AbstractRequestHandler):
@@ -23,7 +27,8 @@ class LaunchRequestHandler(AbstractRequestHandler):
         return ask_utils.is_request_type("LaunchRequest")(handler_input)
 
     def handle(self, handler_input):
-        speak_output = "Bienvenido a YouTube. ¿Qué quieres escuchar o ver?"
+        logger.info("HANDLER: LaunchRequestHandler invocado.")
+        speak_output = "Bienvenido a YouTube. ¿Qué quieres escuchar?"
         return (
             handler_input.response_builder
                 .speak(speak_output)
@@ -38,6 +43,7 @@ class SearchIntentHandler(AbstractRequestHandler):
         return ask_utils.is_intent_name("SearchIntent")(handler_input)
 
     def handle(self, handler_input):
+        logger.info("HANDLER: SearchIntentHandler invocado.")
         # Obtener el término de búsqueda del slot "query"
         slots = handler_input.request_envelope.request.intent.slots
         query = None
@@ -98,6 +104,7 @@ class SearchLastIntentHandler(AbstractRequestHandler):
         return ask_utils.is_intent_name("SearchLastIntent")(handler_input)
 
     def handle(self, handler_input):
+        logger.info("HANDLER: SearchLastIntentHandler invocado.")
         slots = handler_input.request_envelope.request.intent.slots
         query = None
         if slots and "query" in slots and slots["query"].value:
@@ -156,6 +163,7 @@ class PlayOneIntentHandler(AbstractRequestHandler):
         return ask_utils.is_intent_name("PlayOneIntent")(handler_input)
 
     def handle(self, handler_input):
+        logger.info("HANDLER: PlayOneIntentHandler invocado.")
         # Similar Logic a SearchIntent
         slots = handler_input.request_envelope.request.intent.slots
         query = None

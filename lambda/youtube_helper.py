@@ -110,115 +110,143 @@ class YouTubeHelper:
 
     def get_audio_url(self, video_id):
         """
-        Extracción de audio DEEP-SEARCH: Extraemos todos los formatos y elegimos manualmente.
+        Extracción HÍBRIDA V8 (Local + Remote Fallback):
+        1. Intenta extracción local V7 (TV/Android).
+        2. Si falla (bloqueo Lambda), usa Cobalt API (Remote Resolver).
         """
-        logger.info(f"--- INICIO EXTRACCION DEEP-SEARCH: {video_id} ---")
-        video_url = f"https://www.youtube.com/watch?v={video_id}"
+        logger.info(f"--- INICIO EXTRACCION V8 (Hybrid): {video_id} ---")
         
-        # Gestion de COOKIES
+        # --- FASE 1: Intento Local (V7) ---
+        local_url = self._get_local_url(video_id)
+        if local_url:
+            return local_url
+            
+        # --- FASE 2: Remote Fallback (Multi-Instance) ---
+        logger.warning(f"FALLO LOCAL V7. Iniciando FASE 2: Remote Resolver (Redundante)...")
+        return self._get_remote_fallback(video_id)
+
+    def _get_local_url(self, video_id):
+        """Lógica V7 original para intento local (con preferencia de idioma)"""
         temp_cookies_path = '/tmp/yt_cookies.txt'
         local_cookies_path = os.path.join(os.path.dirname(__file__), 'cookies.txt')
         cookiefile = None
         if os.path.exists(local_cookies_path):
             try:
                 shutil.copy2(local_cookies_path, temp_cookies_path)
-                cookiefile = temp_cookies_path
-                logger.info("LOG: Cookies cargadas.")
-            except Exception as e:
-                logger.error(f"LOG ERROR Cookies: {e}")
+            except Exception:
+                pass
 
-        # Estrategias optimizadas SÓLO para pasar el login
-        # NO ponemos 'format' AQUÍ para evitar que yt-dlp falle prematuramente
         strategies = [
-            {
-                'name': 'iOS-Headers',
-                'client': ['ios'],
-                'skip': ['web', 'tv'],
-                'headers': {
-                    'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/604.1',
-                    'Referer': 'https://www.youtube.com/',
-                    'Origin': 'https://www.youtube.com'
-                }
-            },
-            {
-                'name': 'TV-Clean',
-                'client': ['tv'],
-                'skip': ['web', 'ios', 'android'],
-                'headers': {'Referer': 'https://www.youtube.com/'}
-            },
-            {
-                'name': 'MWeb-Fallback',
-                'client': ['mweb', 'android'],
-                'skip': ['web'],
-                'headers': {'Referer': 'https://www.youtube.com/'}
-            }
+            {'name': 'TV-Embedded', 'args': {'player_client': ['tv']}},
+            {'name': 'Android-Native', 'args': {'player_client': ['android', 'android_creator']}}
         ]
 
         for s in strategies:
-            logger.info(f"TRYing strategy: {s['name']}")
+            logger.info(f"TRYING LOCAL: {s['name']}...")
             ydl_opts = {
-                # IMPORTANTE: No ponemos 'format' para que nos devuelva TODO
                 'cookiefile': cookiefile,
                 'noplaylist': True,
                 'quiet': True,
                 'no_warnings': True,
                 'nocheckcertificate': True,
-                'http_headers': s['headers'],
                 'youtube_include_dash_manifest': True,
-                'youtube_include_hls_manifest': True,
-                'check_formats': False, 
-                'extractor_args': {
-                    'youtube': {
-                        'player_client': s['client'],
-                        'player_skip': s['skip']
-                    }
-                }
+                'check_formats': False,
+                # Preferencia de Idioma: Español > Inglés > Original > Mejor Calidad
+                # Evita pistas 'translated' si es posible.
+                'format_sort': ['lang:es', 'lang:en', 'ext'], 
+                'format': 'bestaudio[format_note!*=translated]/bestaudio', 
+                'extractor_args': {'youtube': s['args']}
             }
-            
+
             try:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    info = ydl.extract_info(video_url, download=False)
-                    
-                    if not info or 'formats' not in info:
-                        logger.warning(f"No formats found for {s['name']}")
-                        continue
-                    
-                    # BUSQUEDA MANUAL DE URL
-                    # Prioridad: 1. Audio m4a/mp3, 2. Cualquier Audio, 3. Cualquier Stream con URL
-                    formats = info['formats']
-                    logger.info(f"Found {len(formats)} potential formats for {s['name']}")
-                    
-                    # Candidatos
-                    audio_urls = []
-                    mixed_urls = []
-                    
-                    for f in formats:
-                        url = f.get('url')
-                        if not url: continue
-                        
-                        acodec = f.get('acodec', 'none')
-                        vcodec = f.get('vcodec', 'none')
-                        
-                        if acodec != 'none' and vcodec == 'none':
-                            # Es audio puro
-                            # Preferir m4a (que suele ser aceptado por Alexa)
-                            prio = 10 if f.get('ext') == 'm4a' else 5
-                            audio_urls.append((prio, url))
-                        elif url:
-                            mixed_urls.append(url)
-                            
-                    if audio_urls:
-                        # Ordenar por prioridad y devolver la mejor
-                        audio_urls.sort(key=lambda x: x[0], reverse=True)
-                        logger.info(f"SUCCESS: Found AUDIO URL via {s['name']}!")
-                        return audio_urls[0][1]
-                        
-                    if mixed_urls:
-                        logger.info(f"SUCCESS: Found MIXED URL via {s['name']}!")
-                        return mixed_urls[0]
-
+                    info = ydl.extract_info(video_id, download=False)
+                    if info:
+                        if 'url' in info: return info['url']
+                        for f in info.get('formats', []):
+                            if f.get('vcodec') == 'none' and f.get('url'): return f['url']
             except Exception as e:
-                logger.warning(f"FAIL {s['name']}: {str(e)[:150]}")
-            
-        logger.error(f"--- FIN EXTRACCION (FALLO TOTAL) ---")
+                logger.warning(f"FAIL LOCAL {s['name']}: {str(e)[:50]}")
+        return None
+
+    def _get_remote_fallback(self, video_id):
+        """
+        Sistema de Respaldo Redundante (Multi-Instance) Refinado 2026:
+        Itera sobre una lista de instancias públicas (Piped/Invidious)
+        hasta encontrar una que responda con audio.
+        Incluye fix SSL para Lambda y Preferencia de Idioma (?hl=es).
+        """
+        # Lista de instancias Frescas (Enero 2026)
+        instances = [
+            # Invidious (API v1)
+            ("https://inv.nadeko.net", "invidious"), 
+            ("https://yewtu.be", "invidious"), 
+            ("https://invidious.flokinet.to", "invidious"),
+            ("https://invidious.f5.si", "invidious"),
+            ("https://inv.perditum.com", "invidious"),
+            ("https://invidious.nerdvpn.de", "invidious"),
+            # Piped (Streams)
+            ("https://pipedapi.kavin.rocks", "piped"),
+            ("https://api.piped.privacy.com.de", "piped"),
+        ]
+        
+        import urllib.request
+        import json
+        import ssl
+
+        logger.info(f"INICIANDO FALLBACK REMOTO CON {len(instances)} INSTANCIAS...")
+
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+
+        for base_url, api_type in instances:
+            try:
+                # Construir URL según tipo de API
+                if api_type == "invidious":
+                    # ?hl=es fuerza la localización de la instancia a Español
+                    req_url = f"{base_url}/api/v1/videos/{video_id}?hl=es"
+                else: # piped
+                    req_url = f"{base_url}/streams/{video_id}"
+                
+                logger.info(f"Probando Remote ({api_type}): {base_url} ...")
+                
+                req = urllib.request.Request(
+                    req_url, 
+                    headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
+                )
+                
+                with urllib.request.urlopen(req, timeout=5, context=ctx) as response:
+                    if response.getcode() == 200:
+                        data = json.loads(response.read().decode('utf-8'))
+                        
+                        audio_url = None
+                        
+                        # Extraer URL según el formato de la API
+                        if api_type == "invidious":
+                            for f in data.get('adaptiveFormats', []):
+                                mime = f.get('type', '')
+                                if 'audio' in mime:
+                                    audio_url = f.get('url')
+                                    break
+                        else: # piped
+                            for f in data.get('audioStreams', []):
+                                mime = f.get('mimeType', '')
+                                if 'audio' in mime:
+                                    audio_url = f.get('url')
+                                    break
+                        
+                        if audio_url:
+                            logger.info(f"EXITO REMOTE: Audio encontrado en {base_url}")
+                            return audio_url
+                        else:
+                            logger.warning(f"FALLO PARCIAL: {base_url} respondió OK pero sin streams de audio adecuados.")
+                    else:
+                        logger.warning(f"FALLO HTTP {response.getcode()} en {base_url}")
+                        
+            except Exception as e:
+                logger.warning(f"ERROR Conexión {base_url}: {str(e)[:100]}")
+                continue 
+        
+        logger.error("FALLO TOTAL REMOTE: Ninguna instancia respondió.")
         return None

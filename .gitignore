@@ -12,8 +12,10 @@ package-lock.json
 # Alexa & Lambda
 lambda_pkg/
 lambda_function.zip
+*.zip
 secrets.json
 cookies.txt
+oauth2_cache/
 .ask/
 ask-resources.json.bak
 
